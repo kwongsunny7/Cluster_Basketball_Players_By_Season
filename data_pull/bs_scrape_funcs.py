@@ -1,25 +1,20 @@
 import pandas as pd
 import re
 import urllib
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from collections import defaultdict
 from string import ascii_lowercase
 
-def scrape_player(link, years):
+def is_comment(element): 
+    return isinstance(element, Comment)
+
+def player_physical(player_html, link):
     '''
-    This function takes an input of a link to a player on basketball 
-    reference and years desired and returns two tables with player physical 
-    information and logs of all games. 
+    Gathers player physical information,
+    such as dominant hand, height, weight
     '''
 
-   	# Intializes Variables for acquriing data
-    links_list = set()
     player_info = defaultdict(str)
-    game_logs = defaultdict(defaultdict)
-
-    # Gathers HTML of player page
-    player = urllib.request.urlopen(link)
-    player_html = BeautifulSoup(player, 'html.parser')
 
     # Adds Player_id and player name to player physical information
     link_split = link.split('/')
@@ -29,21 +24,12 @@ def scrape_player(link, years):
     player_info['player_id'] = player_id
     player_info['player_name'] = player_name
 
-    # variables to fill in when the player doesn't play the game.
-    fill_in_cols = ['gs', 'mp', 'fg','fga', 'fg_pct', 'fg3', 'fg3a', 'fg3_pct',
-                'ft', 'fta', 'ft_pct', 'orb', 'drb', 'trb', 'ast', 'stl',
-                'blk','tov','pf','pts','game_score','plus_minus']
-    
-    # gathers physical attributes of player
     for link in player_html.findAll('p'):
         html_txt = link.get_text()
         search = True
         if 'Position:' in html_txt and search == True:
             position_dom_hand = html_txt.split()
-            pos_index = position_dom_hand.index('Position:')
             shoots_index = position_dom_hand.index('Shoots:')
-            player_info['position'] = " ".join(position_dom_hand[pos_index + 1 
-                                               : shoots_index - 1])
             player_info['dominant_hand'] = position_dom_hand[shoots_index + 1]
             search = False
         else:
@@ -55,53 +41,63 @@ def scrape_player(link, years):
                         player_info['weight'] = span.get_text()
             except:
                 continue
-    
-    # gathers lists of all of all links of game logs from a player
-    # links are seperated by year
-    stop_tag = False
-    for link in player_html.findAll('li'):
-        try:
-            a_tag = link.find('a')
-            if 'gamelog' in a_tag['href'] and 'gamelog-playoffs' not in a_tag['href']:
-                stop_tag = True
-                links_list.add('https://www.basketball-reference.com' + a_tag['href'])
-            elif stop_tag:
-                break
-        except:
-            continue
-    
-    links_list = sorted(list(links_list))
-    
-    # for all links, gathers box score statistics for a player on every year
-    for link in links_list:
-        year = link[len(link)-4:len(link)]
-        if year in years:
-            player_year = urllib.request.urlopen(link)
-            player_year_html = BeautifulSoup(player_year, 'html.parser')
-            player_bs_data = defaultdict(list)
-            for table in player_year_html.findAll('tbody'):
-                for row in table.findAll('tr'):
-                    for col in row.findAll('td'):
-                        if col['data-stat'] == 'reason':
-                            for col_name in fill_in_cols:
-                                if col_name in player_bs_data.keys():
-                                    player_bs_data[col_name].append('-')
-                                else:
-                                    player_bs_data[col_name] = ['-']
-                        else:                 
-                            if col['data-stat'] in player_bs_data.keys():
-                                player_bs_data[col['data-stat']].append(col.get_text())
-                                if col['data-stat'] == 'date_game':
-                                    player_bs_data['game_id'].append(col.find('a')['href'])
-                            else:
-                                player_bs_data[col['data-stat']] = [col.get_text()]
-                                if col['data-stat'] == 'date_game':
-                                    player_bs_data['game_id'] = [col.find('a')['href']]
 
-            game_logs[year] = player_bs_data
-            
-    return game_logs, player_info 
+    return player_info
 
+def scrape_player(link):
+    '''
+    Scrapes statistics for a single player, such as per-game, per possession
+    and advanced statistics
+    '''
+
+    player_dict = defaultdict(list)
+    
+    player = urllib.request.urlopen(link)
+    player_html = BeautifulSoup(player, 'html.parser')
+
+    # Gathers player info
+    player_info = player_physical(player_html, link)
+    
+    for table in player_html.findAll('table',{'id':'per_game'}):
+        for row in table:
+            try:
+                for tr in row.findAll('tr',{'class':'full_table'}):
+                    for col in tr:
+                        player_dict[col['data-stat']].append(col.get_text())
+            except AttributeError:
+                pass
+
+    # sets variables to skip for next tables to prevent unequal column lengths
+    skip_vars = ['season', 'age', 'team_id', 'lg_id', 'pos', 'g', 
+                    'gs','fg_pct','ft_pct','fg2_pct','fg3_pct','mp',
+                'DUMMY1','DUMMY2','DUMMY3','DUMMY4','DUMMY', 'efg_pct']
+
+    # List all table names
+    table_names = ['all_per_minute', 'all_per_poss', 'all_advanced', 
+                 'all_adj_shooting', 'all_pbp', 'all_shooting']
+
+    for table_name in table_names:
+        for div in player_html.findAll('div',{'id':table_name}):
+            comment_to_soup = BeautifulSoup(div.find(text=is_comment) , 'html.parser')
+            if table_name in ['all_pbp', 'all_adj_shooting']:
+                all_rows = comment_to_soup.find('tbody').findAll('tr')
+            else:
+                all_rows = comment_to_soup.findAll('tr',{'class':'full_table'})         
+            for tr in all_rows:
+                try:
+                    if not tr.attrs['class'] in [['light_text', 'partial_table'],
+                    ['italic_text', 'partial_table']]:
+                        for col in tr:
+                            if col['data-stat'] not in skip_vars:
+                                player_dict[col['data-stat']].append(col.get_text())
+                except KeyError:
+                        for col in tr:
+                            if col['data-stat'] not in skip_vars:
+                                player_dict[col['data-stat']].append(col.get_text())
+            if table_name == "all_advanced":
+                skip_vars.append('ts_pct')
+    
+    return player_info, player_dict
 
 
 def gather_player_links(years):
@@ -136,20 +132,19 @@ def gather_player_links(years):
     
     return all_links
 
-def append_player_data_by_year(game_logs, player_info, final_data_frames):
+def append_player_data(player_dict, player_info, final_data_frames):
     '''
     Adds game log and physical player data belonging to a single player, to 
-    dictionary of data frames of all game log data split by year. Updates in place!
+    dictionary of a single data frame. 
     '''
+    times_to_add = len(player_dict['season'])
     
-    for years in game_logs.keys():
-        gl_data = pd.DataFrame.from_dict(game_logs[years])
+    for k,v in player_dict.items():
+        final_data_frames[k].extend(v) 
+    gl_data = pd.DataFrame.from_dict(player_dict)
+    for _ in range(times_to_add):
         for items in player_info.items():
-            gl_data[items[0]] = items[1]
-        if years not in final_data_frames.keys():
-            final_data_frames[years] = gl_data
-            continue
-        final_data_frames[years] = final_data_frames[years].append(gl_data)
-        
-    return
+            final_data_frames[items[0]].append(items[1])
+            
+    return final_data_frames
     
