@@ -38,7 +38,7 @@ if __name__ == "__main__":
 	    if link not in pulled_links:
 	        count += 1
 	        full_link = 'https://www.basketball-reference.com' + link
-	        player_info, player_dict = scrape_player(full_link)
+	        player_info, player_dict = scrape_player(full_link, years)
 	        full_player_stats = append_player_data(player_dict, player_info, full_player_stats)
 	        
 	        # saves dictionary everytime a player is added

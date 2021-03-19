@@ -44,7 +44,7 @@ def player_physical(player_html, link):
 
     return player_info
 
-def scrape_player(link):
+def scrape_player(link, years):
     '''
     Scrapes statistics for a single player, such as per-game, per possession
     and advanced statistics
@@ -62,8 +62,12 @@ def scrape_player(link):
         for row in table:
             try:
                 for tr in row.findAll('tr',{'class':'full_table'}):
-                    for col in tr:
-                        player_dict[col['data-stat']].append(col.get_text())
+                    season = tr.find('a').get_text()
+                    dash_idx = season.index('-')
+                    season = season.replace(season[dash_idx-2:dash_idx+1],'')
+                    if season in years:
+                        for col in tr:
+                            player_dict[col['data-stat']].append(col.get_text())
             except AttributeError:
                 pass
 
@@ -84,16 +88,20 @@ def scrape_player(link):
             else:
                 all_rows = comment_to_soup.findAll('tr',{'class':'full_table'})         
             for tr in all_rows:
-                try:
-                    if not tr.attrs['class'] in [['light_text', 'partial_table'],
-                    ['italic_text', 'partial_table']]:
-                        for col in tr:
-                            if col['data-stat'] not in skip_vars:
-                                player_dict[col['data-stat']].append(col.get_text())
-                except KeyError:
-                        for col in tr:
-                            if col['data-stat'] not in skip_vars:
-                                player_dict[col['data-stat']].append(col.get_text())
+                season = tr.find('a').get_text()
+                dash_idx = season.index('-')
+                season = season.replace(season[dash_idx-2:dash_idx+1],'')
+                if season in years:
+                    try:
+                        if not tr.attrs['class'] in [['light_text', 'partial_table'],
+                        ['italic_text', 'partial_table']]:
+                            for col in tr:
+                                if col['data-stat'] not in skip_vars:
+                                    player_dict[col['data-stat']].append(col.get_text())
+                    except KeyError:
+                            for col in tr:
+                                if col['data-stat'] not in skip_vars:
+                                    player_dict[col['data-stat']].append(col.get_text())
             if table_name == "all_advanced":
                 skip_vars.append('ts_pct')
     
